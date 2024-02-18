@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+  <head>
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+    <script src="http://code.jquery.com/jquery-2.2.4.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+    <script src="../dist/mamejs.js"></script>
+    <!-- Bootstrap-select for gamepad / keyboard selection -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-select/1.11.2/css/bootstrap-select.min.css">
+    <link rel="stylesheet" type="text/css" href="../dist/emloader-plugins.css">
+    <link rel="stylesheet" type="text/css" href="demo.css">
+  </head>
+  <body>
+    <div class="container">
+      <h1>mamejs - Demo page</h1>
+      <hr />
+      <div class="row" id="main-container">
+        <div class="row">
+          <div id="buttons-container" class="col-xs-12"></div>
+        </div>
+        <div class="row">
+          <div id="mame-container" class="col-xs-6 col-md-6"></div>
+          <div class="control-container col-xs-6 col-md-6">
+            <div id="player1controller" class="game-controller"></div>
+            <div id="player2controller" class="game-controller"></div>
+          </div>
+        </div>
+        <hr />
+        <div id="gamelist-container"></div>
+      </div>
+    </div>
+    <script type="text/x-tmpl" id="game-template">
+      <button type="button" class="play-button btn btn-lg">
+        <div class="glyphicon glyphicon-play-circle" aria-label="play"></div>
+      </button>
+      <div class="game-title"></div>
+    </script>
+    <script type="text/x-tmpl" id="error-template">
+      <div class="panel panel-danger error-container">
+        <div class="panel-heading">
+          <h3 class="panel-title">Mame Error</h3>
+        </div>
+        <div class="panel-body error-content"></div>
+      </div>
+    </script>
+    <script type="text/x-tmpl" id="loading-template">
+      <div class="loading-container">
+        <div class="loading-text">Loading %game% please wait ...</div>
+      </div>
+      <div class="game-container"></div>
+    </script>
+    <script>
+      // load game list and bootstrap
+      $('document').ready(function() {
+        $.get('gamelist.json', main)
+      })
+
+      // Demo bootstrap
+      function main(gamelist) {
+        mainContainer.style.display = 'block'
+
+        // The gamelist, and the main game
+        buildGamelist(gamelist)
+
+        // the visual controlers
+        buildControllers()
+
+        // The mame buttons on the top of the game
+        buildMameButtons()
+      }
+
+      // Global vars
+      var mameContainer = document.getElementById('mame-container'),
+          mainContainer = document.getElementById('main-container'),
+          buttonsContainer = document.getElementById('buttons-container'),
+          gamelistContainer = document.getElementById('gamelist-container'),
+          controller1Container = document.getElementById('player1controller'),
+          controller2Container = document.getElementById('player2controller'),
+          gameTemplate = document.getElementById('game-template').innerHTML,
+          loadingTemplate = document.getElementById('loading-template').innerHTML,
+          errorTemplate = document.getElementById('error-template').innerHTML
+
+      // Custom mame button, for available keys @see src/mamejs/control/MameKey.ts
+      var mameButtons = [
+        {key: mamejs.MameKey.UI_PAUSE, name: 'game', glyphicon: 'pause'},
+        {key: mamejs.MameKey.UI_SHOW_FPS, name: 'Show FPS', glyphicon: 'film'},
+        {key: mamejs.MameKey.UI_CONFIGURE, name: 'Menu', glyphicon: 'list-alt'},
+      ]
+
+      // mamejs.run config file
+      var config = {
+        emulator: '../dist/mame.js',
+        resolution: {
+          width: 320,
+          height: 320
+        },
+        game: null, // will be updated on the fly in runGame()
+      }
+
+      // launch mame game :
+      // @see gamelist.json for `game` interface
+      function runGame(game) {
+        var cfg = JSON.parse(JSON.stringify(config)) // lazy clone
+        cfg.game = game
+
+        // special trick to use custom emulator for a game
+        cfg.emulator = game.emulator || cfg.emulator
+
+        // loading screen
+        mameContainer.innerHTML = loadingTemplate.replace('%game%', game.name)
+        mameContainer.getElementsByClassName('loading-container')[0].style.backgroundImage = 'url(' + game.screenshot + ')'
+
+        // container for mamejs
+        var gameCnt = document.getElementsByClassName('game-container')[0]
+
+        // run mame is as simple as this !
+        mamejs.run(cfg, gameCnt).then(function(mame) {
+          // for debug
+          window.mame = mame
+
+          // handle sterr
+          handleMameError(mame)
+
+          console.log('running game ' + game.name, mame)
+        }).catch(function(error) {
+          mameContainer.innerHTML = errorTemplate
+          mameContainer.getElementsByClassName('error-content')[0].innerHTML = 'error running game ' + game.name + '<br /><br />' + error
+        })
+      }
+
+      // Display error when mame fail, still experimental
+      function handleMameError(mame) {
+        var haveError = false
+        var onStderr = function(text) {
+          if (!haveError) {
+            haveError = true
+            mameContainer.innerHTML = errorTemplate
+          }
+
+          var content = document.createElement('div')
+          content.innerHTML = text
+          mameContainer.getElementsByClassName('error-content')[0].appendChild(content)
+        }
+        //mame.loader.on(emloader.ON_STDERR, onStderr)
+        //mame.loader.stderr.forEach(onStderr)
+
+        mame.loader.module.addOnExit(function() {
+          mame.loader.stderr.forEach(onStderr)
+        })
+      }
+
+      // simple gamelist
+      function buildGamelist(gamelist) {
+        gamelist.forEach(function(game, index) {
+          // always append first game in the main container
+          buildGameItem(game, index === 0 ? mameContainer : gamelistContainer)
+        })
+
+        // put first game at the end of the list
+        buildGameItem(gamelist[0], gamelistContainer)
+      }
+
+      // Create game thumb, and launch mame on click
+      function buildGameItem(game, container) {
+        var element = document.createElement('div')
+        element.className = 'game-item'
+        element.innerHTML = gameTemplate
+        element.style.backgroundImage = 'url(' + game.screenshot + ')'
+        element.getElementsByClassName('game-title')[0].innerHTML = game.name
+
+        element.addEventListener('click', function () {
+          runGame(game)
+        });
+
+        container.appendChild(element)
+      }
+
+      function buildControllers() {
+        let controller1 = new emloader.plugins.VirtualController(mamejs.controllers, mamejs.ControllersMapping.player1)
+        let controller2 = new emloader.plugins.VirtualController(mamejs.controllers, mamejs.ControllersMapping.player2)
+
+        controller1Container.appendChild(controller1.getElement())
+        controller2Container.appendChild(controller2.getElement())
+
+        // allow controllers to work before a mamejs instance launched
+        mamejs.controllers.setKeyHandler(new emloader.FakeKeyHandler())
+        mamejs.controllers.bind()
+      }
+
+      function buildMameButtons() {
+        // also init mame buttons
+        mameButtons.forEach(function(item) {
+          let button = new emloader.plugins.ControllerButton(mamejs.controllers, item.key)
+          button.setValue(item.name)
+
+          let element = button.getElement()
+          element.className = "btn-xs btn btn-default"
+          if (item.glyphicon) {
+            let icon = document.createElement('span')
+            icon.className = 'glyphicon glyphicon-' + item.glyphicon
+            element.insertBefore(icon, element.getElementsByTagName('span')[0])
+          }
+          buttonsContainer.appendChild(element)
+        })
+      }
+
+    </script>
+  </body>
+</html>
